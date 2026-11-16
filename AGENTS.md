@@ -11,8 +11,9 @@ Este arquivo registra as decisões de arquitetura (com os motivos) e a ordem de 
 ## 1. Convenções
 
 - Python 3.12. Toda a infraestrutura (Postgres/pgvector e os serviços) sobe com `docker compose`.
-- **Segredos** (chaves de API, token do Telegram, email do User-Agent da SEC) ficam em `.env`, que nunca vai para o git. Mantenha um `.env.example` sem valores reais.
-- Configurações que mudam entre ambientes (modelo, effort, janela de conversa, whitelist, URL do banco) vêm do `.env`, nunca fixas no código.
+- **Segredos e dados pessoais** (chave da Anthropic, token do Telegram, senha do Postgres, email do User-Agent da SEC, IDs da whitelist) ficam em `.env`, que nunca vai para o git. Mantenha um `.env.example` versionado, sem valores reais.
+- **Configurações** (modelo, effort, `max_tokens`, janela de conversa, `max_uses` do web search, lista de empresas da SEC, parâmetros de chunking, modelo de embedding) ficam em `config.toml`, **versionado**. Nada disso fica fixo no código.
+- A configuração é carregada com `pydantic-settings`: primeiro o `config.toml`, depois o `.env` e as variáveis de ambiente por cima (útil para testar outro modelo ou configurar o Docker sem editar o arquivo).
 - **Commits** seguem o [Conventional Commits](https://www.conventionalcommits.org), em inglês: `<tipo>(<escopo>): <descrição no imperativo>`. Tipos: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`. Escopos: `chatbot`, `ingestion`, `shared`, `mcp`. Só a linha de assunto, sem corpo nem rodapé; uma mudança lógica por commit; `!` marca quebra de compatibilidade.
 
 ---
@@ -40,7 +41,8 @@ Um repositório só, com serviços separados:
 financials-agent/
 ├── AGENTS.md
 ├── docker-compose.yml      # db (pgvector/pgvector) + chatbot + ingestion
-├── .env.example
+├── config.toml             # configurações versionadas
+├── .env.example            # modelo do .env (segredos e dados pessoais)
 ├── shared/                 # schema do banco, config, modelo de embedding, tools de dados
 ├── chatbot/                # bot do Telegram + loop do agente
 ├── ingestion/              # pipeline da SEC (agendado)
@@ -56,7 +58,7 @@ financials-agent/
 ### Decisão
 - **Messages API**, pelo SDK Python oficial (`anthropic`), autenticada com **chave de API** do Console (platform.claude.com), cobrada por token com créditos pré-pagos. Não existe cota mensal gratuita. Configure um limite de gasto no Console.
 - **Por que não a assinatura nem o Agent SDK:** a documentação do Agent SDK diz que, sem aprovação prévia, não é permitido oferecer o login do claude.ai (assinatura) em produtos de terceiros, inclusive agentes feitos com o Agent SDK. Além disso, o Agent SDK é o Claude Code empacotado: as tools padrão dele (arquivos, terminal) não fazem sentido num bot, as sessões ficam em arquivos locais (não no nosso Postgres) e a migração depois seria em grande parte código descartável. O **Claude Code Channels** (plugin oficial de Telegram para uma sessão local do Claude Code, que usa a assinatura) serve para uso pessoal, não para construir um chatbot próprio. A assinatura do Claude fica para **desenvolver** o projeto com o Claude Code e para usar o servidor MCP (seção 7).
-- **Modelo:** configurável via `.env`. Padrão de produção: `claude-opus-5-5`. Para desenvolvimento barato: `claude-haiku-5-5`. Use só IDs exatos, sem sufixo de data.
+- **Modelo:** configurável no `config.toml`. Padrão de produção: `claude-opus-5-5`. Para desenvolvimento barato: `claude-haiku-5-5`. Use só IDs exatos, sem sufixo de data.
 - **Thinking:** no Opus 5.5 ele está sempre ligado (adaptativo); `{"type": "disabled"}` dá erro 400. A profundidade se controla com `output_config={"effort": ...}`. O padrão do Opus 5.5 é `medium`; para chat, `low` costuma bastar. Deixe configurável.
 - Não use prefill de mensagem do assistente (dá 400 nos modelos atuais) nem `tool_choice` forçado (`any`/`tool` dá 400 no Opus 5.5); use `auto`.
 - **Recusas:** trate `stop_reason == "refusal"`. Para o Opus 5.5, avalie o parâmetro server-side `fallbacks` (beta `server-side-fallback-2026-07-01`, `fallbacks="default"`).
@@ -115,7 +117,7 @@ A resposta da API é uma lista de blocos tipados: `text` (com `citations` opcion
 - **Mensagem:** uma linha na tabela `messages`.
 
 ### Regras (estratégia "A": inatividade + comando)
-- Uma nova conversa começa quando passam **10 minutos desde a última resposta do bot** (configurável no `.env`; conta-se da resposta, não da pergunta, para que um processamento longo não "mate" a conversa).
+- Uma nova conversa começa quando passam **10 minutos desde a última resposta do bot** (configurável no `config.toml`; conta-se da resposta, não da pergunta, para que um processamento longo não "mate" a conversa).
 - `/nova` força uma conversa nova.
 - Responder (*reply*) a uma mensagem antiga do bot retoma a conversa daquela mensagem, mesmo fora da janela. Por isso guardamos o `telegram_message_id` das respostas.
 - Dentro da conversa, cada nova mensagem é enviada com **todo o histórico da conversa atual** (a API não guarda estado).
@@ -224,7 +226,7 @@ Expõe as mesmas funções de `shared/tools` via MCP, para explorar os dados em 
 
 | # | Etapa | Status |
 |---|---|---|
-| 1 | **Esqueleto do monorepo + `docker-compose` com Postgres/pgvector**: estrutura de pastas, config via `.env`, schema e migrações (Alembic), Dockerfile do chatbot | ⏳ próximo |
+| 1 | **Esqueleto do monorepo + `docker-compose` com Postgres/pgvector**: estrutura de pastas, config (`config.toml` + `.env`), schema e migrações (Alembic), Dockerfile do chatbot | ⏳ próximo |
 | 2 | **Chatbot no Telegram**: Messages API + `web_search`, loop manual, whitelist, histórico completo no Postgres, janela de 10 min, `/nova`, retomada por *reply*, fontes no fim da resposta, testes | ⬜ |
 | 3 | **Ingestão da SEC**: discover → download → companyfacts → parse (BeautifulSoup + markdownify) → chunk → embed, idempotente e com status; agendamento | ⬜ |
 | 4 | **Tools de dados**: `query_financial_facts` (SQL) e `search_filings` (RAG vetorial com filtros de metadados), integradas ao bot e expostas no servidor MCP | ⬜ |
