@@ -11,7 +11,7 @@ Este arquivo registra as decisões de arquitetura (com os motivos) e a ordem de 
 ## 1. Convenções
 
 - Python 3.12. Toda a infraestrutura (Postgres/pgvector e os serviços) sobe com `docker compose`.
-- **Segredos e dados pessoais** (chave da Anthropic, token do Telegram, senha do Postgres, email do User-Agent da SEC, IDs da whitelist) ficam em `.env`, que nunca vai para o git. Mantenha um `.env.example` versionado, sem valores reais.
+- **Segredos e dados pessoais** (chave da Anthropic, token do Telegram, senha do Postgres, email do User-Agent da SEC, IDs da whitelist) ficam em `.env`, que nunca vai para o git. Mantenha um `.env.example` versionado, sem valores reais. O `@username` do bot do Telegram também não aparece em nenhum arquivo versionado.
 - **Configurações** (modelo, effort, `max_tokens`, janela de conversa, `max_uses` do web search, lista de empresas da SEC, parâmetros de chunking, modelo de embedding) ficam em `config.toml`, **versionado**. Nada disso fica fixo no código.
 - A configuração é carregada com `pydantic-settings`: primeiro o `config.toml`, depois o `.env` e as variáveis de ambiente por cima (útil para testar outro modelo ou configurar o Docker sem editar o arquivo).
 - **Commits** seguem o [Conventional Commits](https://www.conventionalcommits.org), em inglês: `<tipo>(<escopo>): <descrição no imperativo>`. Tipos: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`. Escopos: `chatbot`, `ingestion`, `shared`, `mcp`. Só a linha de assunto, sem corpo nem rodapé; uma mudança lógica por commit; `!` marca quebra de compatibilidade.
